@@ -14,6 +14,8 @@ out/
 .cache/
 resources/runtimes/whisper/darwin-arm64/bin/
 resources/runtimes/whisper/darwin-arm64/lib/
+resources/runtimes/whisper/darwin-x64/bin/
+resources/runtimes/whisper/darwin-x64/lib/
 
 # Local environment
 .env

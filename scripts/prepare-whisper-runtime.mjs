@@ -17,11 +17,15 @@ import { fileURLToPath } from "node:url";
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
 const version = "v1.9.1";
-const runtimeDir = join(root, "resources", "runtimes", "whisper", "darwin-arm64");
+const requestedRuntimeArch = process.env.BRIEFINK_RUNTIME_ARCH ?? process.arch;
+const runtimeArch = normalizeRuntimeArch(requestedRuntimeArch);
+const runtimePlatform = `darwin-${runtimeArch}`;
+const cmakeArch = runtimeArch === "x64" ? "x86_64" : "arm64";
+const runtimeDir = join(root, "resources", "runtimes", "whisper", runtimePlatform);
 const binDir = join(runtimeDir, "bin");
 const libDir = join(runtimeDir, "lib");
 const sourceDir = join(root, ".cache", `whisper.cpp-${version}`);
-const buildDir = join(sourceDir, "build");
+const buildDir = join(sourceDir, `build-${runtimePlatform}`);
 const executable = join(binDir, "whisper-cli");
 
 function run(bin, args, options = {}) {
@@ -70,7 +74,13 @@ function copyRuntimeFile(source, destination) {
   copyFileSync(source, destination);
 }
 
-if (process.platform !== "darwin" || process.arch !== "arm64") {
+function normalizeRuntimeArch(arch) {
+  if (arch === "x64" || arch === "x86_64" || arch === "amd64") return "x64";
+  if (arch === "arm64" || arch === "aarch64") return "arm64";
+  throw new Error(`Unsupported BriefInk runtime architecture: ${arch}. Use arm64 or x64.`);
+}
+
+if (process.platform !== "darwin") {
   console.log(`Skipping bundled whisper runtime for ${process.platform}-${process.arch}.`);
   process.exit(0);
 }
@@ -89,6 +99,7 @@ run("cmake", [
   "-B",
   buildDir,
   "-DCMAKE_BUILD_TYPE=Release",
+  `-DCMAKE_OSX_ARCHITECTURES=${cmakeArch}`,
   "-DGGML_METAL=ON",
   "-DGGML_BLAS=ON",
   "-DGGML_BLAS_VENDOR=Apple",
@@ -128,7 +139,7 @@ writeFileSync(
     "",
     `Source: https://github.com/ggerganov/whisper.cpp/tree/${version}`,
     "License: MIT, see LICENSE.whisper.cpp",
-    "Binary: whisper-cli for macOS arm64 with Metal, Accelerate, and CPU support bundled as local dylibs.",
+    `Binary: whisper-cli for macOS ${runtimeArch} with Metal, Accelerate, and CPU support bundled as local dylibs.`,
     ""
   ].join("\n"),
   "utf8"

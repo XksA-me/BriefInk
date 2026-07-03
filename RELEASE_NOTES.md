@@ -12,6 +12,7 @@ This release focuses on open-source readiness, interface polish, localization, a
 - Replaced app icon and in-app brand mark with the provided BriefInk logo.
 - Improved README with Chinese and English sections, usage instructions, development notes, and open-source credits.
 - Credited VoiceInk, whisper.cpp, OpenAI Whisper, and the app framework projects.
+- Added separate Intel Mac (`x64`) release artifacts and documented the build process in `BUILD_INTEL_MAC.md`.
 
 ## Validation
 
