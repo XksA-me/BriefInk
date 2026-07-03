@@ -1,0 +1,93 @@
+{
+  "name": "briefink",
+  "version": "0.1.0",
+  "private": false,
+  "description": "A minimal macOS speech-to-text desktop tool.",
+  "author": "BriefInk",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git@github.com:XksA-me/BriefInk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/XksA-me/BriefInk/issues"
+  },
+  "homepage": "https://github.com/XksA-me/BriefInk#readme",
+  "main": "dist-electron/electron/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron .\"",
+    "prepare:whisper-runtime": "node scripts/prepare-whisper-runtime.mjs",
+    "build": "rm -rf dist dist-electron && tsc -p tsconfig.json && vite build && tsc -p tsconfig.electron.json",
+    "dist": "npm run build && electron-builder",
+    "dist:mac": "npm run prepare:whisper-runtime && npm run build && electron-builder --mac",
+    "pack:mac": "npm run prepare:whisper-runtime && npm run build && electron-builder --mac dir",
+    "start": "electron .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.electron.json"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "busboy": "^1.6.0",
+    "electron-store": "^10.0.1",
+    "lucide-react": "^0.468.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/busboy": "^1.5.4",
+    "@types/node": "^22.10.2",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "@vitest/ui": "^2.1.8",
+    "concurrently": "^9.1.2",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vitest": "^2.1.8",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "ink.briefink.app",
+    "productName": "BriefInk",
+    "artifactName": "BriefInk-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "resources/runtimes",
+        "to": "runtimes",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "entitlements": "resources/entitlements.mac.plist",
+      "entitlementsInherit": "resources/entitlements.mac.plist",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "BriefInk needs microphone access to record your speech and transcribe it locally.",
+        "NSAppleEventsUsageDescription": "BriefInk uses System Events to paste transcribed text into the frontmost app when you enable auto paste."
+      },
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "dmg": {
+      "artifactName": "BriefInk-${version}-${arch}.${ext}"
+    }
+  }
+}

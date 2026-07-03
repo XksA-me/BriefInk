@@ -1,0 +1,31 @@
+.DS_Store
+*.log
+
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+dist-electron/
+release/
+out/
+
+# Local caches and generated native runtimes
+.cache/
+resources/runtimes/whisper/darwin-arm64/bin/
+resources/runtimes/whisper/darwin-arm64/lib/
+
+# Local environment
+.env
+.env.*
+
+# App/user data and recordings
+recordings/
+models/
+*.wav
+*.webm
+*.m4a
+
+# IDE
+.idea/
+.vscode/
