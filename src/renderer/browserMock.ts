@@ -151,6 +151,9 @@ export function installBrowserMockApi() {
         }
       });
     },
+    async reportRecordingError(message: string) {
+      return emitRecording({ status: "error", error: message, durationSeconds: 0, modelName: snapshot.models.find((model) => model.default)?.name });
+    },
     async getMicrophoneAccess() {
       return "granted";
     },

@@ -64,6 +64,41 @@ type ManagedProcessEntry = {
 
 const managedProcesses = new Set<ManagedProcessEntry>();
 
+const mainMessages = {
+  en: {
+    hotkeyFailed: "Could not register {accelerator}. Choose another shortcut.",
+    noAudioPayload: "Recording stopped without audio data. Use the in-app recorder or global hotkey path.",
+    pasted: "Transcription pasted into the frontmost app.",
+    copied: "Transcription copied to clipboard.",
+    recordingFailed: "Recording failed",
+    accessibilityTitle: "BriefInk needs Accessibility",
+    accessibilityBody: "Enable Accessibility permission to auto paste into other apps."
+  },
+  "zh-CN": {
+    hotkeyFailed: "无法注册快捷键 {accelerator}，请更换一个组合键。",
+    noAudioPayload: "录音停止但没有收到音频数据。请从录音页或全局快捷键重新开始。",
+    pasted: "转写内容已粘贴到当前 App。",
+    copied: "转写内容已复制到剪贴板。",
+    recordingFailed: "录音失败",
+    accessibilityTitle: "BriefInk 需要辅助功能权限",
+    accessibilityBody: "请授权辅助功能权限，BriefInk 才能自动粘贴到其他 App。"
+  }
+} as const;
+
+type MainMessageKey = keyof typeof mainMessages.en;
+
+function mainText(key: MainMessageKey, replacements?: Record<string, string | number>): string {
+  const language = settingsStore?.get().appearance?.language ?? "en";
+  const dictionary = mainMessages[language] ?? mainMessages.en;
+  const template = dictionary[key] ?? mainMessages.en[key];
+  if (!replacements) return template;
+  let text: string = template;
+  for (const [name, value] of Object.entries(replacements)) {
+    text = text.replaceAll(`{${name}}`, String(value));
+  }
+  return text;
+}
+
 function userDataPath(...parts: string[]) {
   return path.join(app.getPath("userData"), ...parts);
 }
@@ -345,7 +380,30 @@ function hudHtml(): string {
     </div>
   </div>
   <script>
+    const messages = {
+      en: {
+        ready: "Ready",
+        recording: "Recording",
+        transcribing: "Transcribing",
+        completed: "Pasted",
+        attention: "BriefInk needs attention",
+        stopHint: "Press the shortcut again to stop",
+        pastedHint: "Text is ready in the current app",
+        error: "Something went wrong"
+      },
+      "zh-CN": {
+        ready: "就绪",
+        recording: "正在录音",
+        transcribing: "正在转写",
+        completed: "已粘贴",
+        attention: "BriefInk 需要处理",
+        stopHint: "再次按快捷键停止录音",
+        pastedHint: "文字已准备好并粘贴到当前 App",
+        error: "出现问题"
+      }
+    };
     let current = { status: "idle", durationSeconds: 0 };
+    let language = "en";
     let tick = null;
     const hud = document.getElementById("hud");
     const icon = document.getElementById("icon");
@@ -362,12 +420,23 @@ function hudHtml(): string {
       const rest = String(Math.floor(seconds % 60)).padStart(2, "0");
       return minutes + ":" + rest;
     }
+    function text(key) {
+      return (messages[language] || messages.en)[key] || messages.en[key] || key;
+    }
+    async function applyLanguage() {
+      try {
+        const snapshot = await window.briefInk?.getSnapshot?.();
+        language = snapshot?.settings?.appearance?.language || "en";
+      } catch (_error) {
+        language = "en";
+      }
+    }
     function titleFor(state) {
-      if (state.status === "recording") return "Recording";
-      if (state.status === "transcribing") return "Transcribing";
-      if (state.status === "completed") return "Pasted";
-      if (state.status === "error") return "BriefInk needs attention";
-      return "Ready";
+      if (state.status === "recording") return text("recording");
+      if (state.status === "transcribing") return text("transcribing");
+      if (state.status === "completed") return text("completed");
+      if (state.status === "error") return text("attention");
+      return text("ready");
     }
     function iconFor(state) {
       if (state.status === "recording") return "●";
@@ -377,13 +446,14 @@ function hudHtml(): string {
       return "●";
     }
     function subtitleFor(state) {
-      if (state.status === "recording") return "Press the shortcut again to stop";
+      if (state.status === "recording") return text("stopHint");
       if (state.status === "transcribing") return state.modelName || "BriefInk";
-      if (state.status === "completed") return "Text is ready in the current app";
-      if (state.status === "error") return state.error || "Something went wrong";
+      if (state.status === "completed") return text("pastedHint");
+      if (state.status === "error") return state.error || text("error");
       return state.modelName || "BriefInk";
     }
-    function render(state) {
+    async function render(state) {
+      await applyLanguage();
       current = state || current;
       hud.className = "hud " + current.status;
       title.textContent = titleFor(current);
@@ -398,7 +468,7 @@ function hudHtml(): string {
       }
     }
     window.briefInk?.getSnapshot?.().then((snapshot) => render(snapshot.recording)).catch(() => {});
-    window.briefInk?.onRecordingState?.((state) => render(state));
+    window.briefInk?.onRecordingState?.((state) => void render(state));
   </script>
 </body>
 </html>`;
@@ -455,7 +525,7 @@ function registerHotkey(accelerator: string) {
   });
   if (!registered) {
     logger.warn("Could not register global hotkey", { accelerator, electronAccelerator });
-    setRecordingState({ status: "error", error: `Could not register ${accelerator}. Choose another shortcut.` });
+    setRecordingState({ status: "error", error: mainText("hotkeyFailed", { accelerator }) });
   } else {
     logger.info("Registered global hotkey", { accelerator, electronAccelerator });
   }
@@ -478,7 +548,7 @@ async function toggleRecording(): Promise<RecordingState> {
     logger.info("Stopping recording state from legacy toggle without audio payload");
     return setRecordingState({
       status: "error",
-      error: "Recording stopped without audio data. Use the in-app recorder or global hotkey path."
+      error: mainText("noAudioPayload")
     });
   }
 
@@ -508,7 +578,7 @@ async function transcribeAudioFile(audioPath: string): Promise<RecordingState> {
       outputLanguage: settings.language.outputLanguage
     });
     const finalText = settings.output.copyTarget === "translation" ? result.translatedText ?? result.text : result.text;
-    const output = await sendOutput({ text: finalText, body: settings.output.autoPaste ? "Transcription pasted into the frontmost app." : "Transcription copied to clipboard." });
+    const output = await sendOutput({ text: finalText, body: settings.output.autoPaste ? mainText("pasted") : mainText("copied") });
     if (settings.history.saveHistory) {
       historyStore.add(toHistoryEntry(result, model.name, audioPath, settings));
     }
@@ -606,10 +676,16 @@ function registerIpc() {
   ipcMain.handle(IPC_CHANNELS.recordingStop, () =>
     setRecordingState({
       status: "error",
-      error: "No audio payload was provided. Stop recording from the recorder UI or global hotkey."
+      error: mainText("noAudioPayload")
     })
   );
   ipcMain.handle(IPC_CHANNELS.recordingToggle, () => toggleRecording());
+  ipcMain.handle("recording:reportError", (_event, message: string) =>
+    setRecordingState({
+      status: "error",
+      error: message || mainText("recordingFailed")
+    })
+  );
   ipcMain.handle("permissions:getMicrophoneAccess", () => {
     if (process.platform !== "darwin") return "unknown";
     return systemPreferences.getMediaAccessStatus("microphone");
@@ -791,8 +867,8 @@ async function pasteClipboardIntoFrontmostApp(): Promise<boolean> {
     logger.warn("Auto paste skipped because Accessibility permission is not granted");
     if (Notification.isSupported()) {
       new Notification({
-        title: "BriefInk needs Accessibility",
-        body: "Enable Accessibility permission to auto paste into other apps."
+        title: mainText("accessibilityTitle"),
+        body: mainText("accessibilityBody")
       }).show();
     }
     return false;
@@ -907,7 +983,11 @@ app.whenReady().then(async () => {
 }
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) void createWindow();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    focusMainWindow();
+    return;
+  }
+  void createWindow();
 });
 
 app.on("before-quit", (event) => {

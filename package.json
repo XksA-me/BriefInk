@@ -1,6 +1,6 @@
 {
   "name": "briefink",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": false,
   "description": "A minimal macOS speech-to-text desktop tool.",
   "author": "BriefInk",
@@ -43,7 +43,7 @@
     "@types/react-dom": "^18.3.5",
     "@vitest/ui": "^2.1.8",
     "concurrently": "^9.1.2",
-    "electron": "^33.3.1",
+    "electron": "^33.4.11",
     "electron-builder": "^25.1.8",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
@@ -74,6 +74,7 @@
     "asar": true,
     "mac": {
       "category": "public.app-category.productivity",
+      "icon": "resources/icons/lnkbrief.icns",
       "hardenedRuntime": true,
       "entitlements": "resources/entitlements.mac.plist",
       "entitlementsInherit": "resources/entitlements.mac.plist",

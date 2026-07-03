@@ -16,32 +16,34 @@ import {
   Settings,
   Square,
   Trash2,
-  Waves,
   X
 } from "lucide-react";
 import type { AppSettings, BriefInkSnapshot, CloudProviderConfig, LanguageCode, RecordingState, SpeechModel } from "../shared/types";
+import logoUrl from "./assets/lnkbrief_128.png";
+import { createTranslator, type MessageKey } from "./i18n";
 
 type Page = "model" | "record" | "history" | "settings";
 type AudioDeviceOption = { deviceId: string; label: string };
+type Translator = ReturnType<typeof createTranslator>;
 
-const languageOptions: Array<{ value: LanguageCode; label: string }> = [
-  { value: "auto", label: "Auto Detect" },
-  { value: "same", label: "Same as spoken language" },
-  { value: "zh", label: "Chinese" },
-  { value: "en", label: "English" },
-  { value: "ja", label: "Japanese" },
-  { value: "ko", label: "Korean" },
-  { value: "es", label: "Spanish" },
-  { value: "fr", label: "French" },
-  { value: "de", label: "German" }
+const languageOptions: Array<{ value: LanguageCode; labelKey: MessageKey }> = [
+  { value: "auto", labelKey: "languages.auto" },
+  { value: "same", labelKey: "languages.same" },
+  { value: "zh", labelKey: "languages.zh" },
+  { value: "en", labelKey: "languages.en" },
+  { value: "ja", labelKey: "languages.ja" },
+  { value: "ko", labelKey: "languages.ko" },
+  { value: "es", labelKey: "languages.es" },
+  { value: "fr", labelKey: "languages.fr" },
+  { value: "de", labelKey: "languages.de" }
 ];
 
 const nav = [
-  { id: "model", label: "Model", icon: Database },
-  { id: "record", label: "Record", icon: Mic },
-  { id: "history", label: "History", icon: History },
-  { id: "settings", label: "Settings", icon: Settings }
-] satisfies Array<{ id: Page; label: string; icon: typeof Database }>;
+  { id: "model", labelKey: "nav.model", icon: Database },
+  { id: "record", labelKey: "nav.record", icon: Mic },
+  { id: "history", labelKey: "nav.history", icon: History },
+  { id: "settings", labelKey: "nav.settings", icon: Settings }
+] satisfies Array<{ id: Page; labelKey: MessageKey; icon: typeof Database }>;
 
 export function App() {
   const [page, setPage] = useState<Page>("model");
@@ -54,6 +56,7 @@ export function App() {
   const recordingTimeout = useRef<number | null>(null);
 
   const refresh = async () => setSnapshot(await window.briefInk.getSnapshot());
+  const t = useMemo(() => createTranslator(snapshot?.settings.appearance?.language), [snapshot?.settings.appearance?.language]);
 
   useEffect(() => {
     void refresh();
@@ -72,10 +75,14 @@ export function App() {
       setPermissionError(null);
       const hasAccess = await window.briefInk.requestMicrophoneAccess();
       if (!hasAccess) {
-        throw new Error("Microphone access is not granted. Open macOS System Settings > Privacy & Security > Microphone and enable BriefInk.");
+        throw new Error(t("notices.micDenied"));
       }
       if (!navigator.mediaDevices?.getUserMedia) {
-        throw new Error("This Electron window cannot access navigator.mediaDevices.getUserMedia.");
+        throw new Error(t("notices.mediaUnavailable"));
+      }
+      const devices = navigator.mediaDevices.enumerateDevices ? await navigator.mediaDevices.enumerateDevices() : [];
+      if (!devices.some((device) => device.kind === "audioinput")) {
+        throw new Error(t("notices.noInputDevice"));
       }
 
       const inputDeviceId = snapshot?.settings.recording.inputDeviceId ?? "default";
@@ -99,15 +106,16 @@ export function App() {
         try {
           const { wav, stats } = await webmBlobToWav(blob);
           if (stats.peak < 0.01 || stats.rms < 0.0015) {
-            throw new Error(`No microphone signal detected (peak ${stats.peak.toFixed(4)}, rms ${stats.rms.toFixed(4)}). Check BriefInk microphone permission and selected input device.`);
+            throw new Error(`${t("notices.noSignal")} (${stats.peak.toFixed(4)} / ${stats.rms.toFixed(4)})`);
           }
           const state = await window.briefInk.transcribeBlob(await wav.arrayBuffer(), wav.type);
           setSnapshot((current) => (current ? { ...current, recording: state } : current));
           await refreshSnapshot(setSnapshot);
         } catch (error) {
-          const message = error instanceof Error ? error.message : "Recording conversion or transcription failed.";
+          const message = error instanceof Error ? error.message : t("notices.conversionFailed");
           setPermissionError(message);
           setNotice(message);
+          await window.briefInk.reportRecordingError(message);
           window.setTimeout(() => setNotice(null), 4200);
         } finally {
           recorder.current = null;
@@ -122,20 +130,19 @@ export function App() {
         if (recorder.current?.state === "recording") recorder.current.stop();
       }, maxDuration * 1000);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Microphone permission failed.";
+      const message = error instanceof Error ? error.message : t("notices.micFailed");
       setPermissionError(message);
       setNotice(message);
+      await window.briefInk.reportRecordingError(message);
       window.setTimeout(() => setNotice(null), 4200);
     }
-  }, [snapshot?.settings.recording.inputDeviceId, snapshot?.settings.recording.maxDurationSeconds]);
+  }, [snapshot?.settings.recording.inputDeviceId, snapshot?.settings.recording.maxDurationSeconds, t]);
 
   useEffect(() => window.briefInk.onHotkeyToggle(() => void toggleMicRecording()), [toggleMicRecording]);
 
-  const defaultModel = useMemo(() => snapshot?.models.find((model) => model.default), [snapshot?.models]);
-
   async function modelAction(kind: "download" | "start" | "stop" | "default", action: (id: string) => Promise<SpeechModel[]>, id: string) {
     setBusyModel(id);
-    setNotice(modelActionNotice(kind));
+    setNotice(modelActionNotice(kind, t));
     setSnapshot((current) => {
       if (!current) return current;
       return {
@@ -152,9 +159,9 @@ export function App() {
     try {
       const models = await action(id);
       setSnapshot((current) => (current ? { ...current, models } : current));
-      setNotice("Model state updated.");
+      setNotice(t("notices.modelUpdated"));
     } catch (error) {
-      const message = error instanceof Error ? error.message : "Model action failed.";
+      const message = error instanceof Error ? error.message : t("notices.modelFailed");
       setNotice(message);
       await refresh();
     } finally {
@@ -169,19 +176,17 @@ export function App() {
   }
 
   if (!snapshot) {
-    return <div className="boot">Loading BriefInk...</div>;
+    return <div className="boot">{t("app.loading")}</div>;
   }
 
   return (
     <div className="shell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brandMark">
-            <Waves size={20} />
-          </div>
+          <img className="brandMark imageMark" src={logoUrl} alt="" />
           <div>
             <strong>BriefInk</strong>
-            <span>Speech to text</span>
+            <span>{t("nav.record")}</span>
           </div>
         </div>
 
@@ -191,14 +196,14 @@ export function App() {
             return (
               <button key={item.id} className={page === item.id ? "navItem active" : "navItem"} onClick={() => setPage(item.id)}>
                 <Icon size={18} />
-                {item.label}
+                {t(item.labelKey)}
               </button>
             );
           })}
         </nav>
 
         <div className="sidebarFooter subtleFooter">
-          <span>BriefInk {snapshot.settings.appearance?.language === "zh-CN" ? "开源版" : "Open Source"}</span>
+          <span>BriefInk {t("app.openSource")}</span>
         </div>
       </aside>
 
@@ -209,6 +214,7 @@ export function App() {
             snapshot={snapshot}
             busyModel={busyModel}
             updateSettings={updateSettings}
+            t={t}
             onDownload={(id) => modelAction("download", window.briefInk.downloadModel, id)}
             onStart={(id) => modelAction("start", window.briefInk.startModel, id)}
             onStop={(id) => modelAction("stop", window.briefInk.stopModel, id)}
@@ -219,20 +225,20 @@ export function App() {
             }}
           />
         )}
-        {page === "record" && <RecordPage snapshot={snapshot} permissionError={permissionError} toggleMicRecording={toggleMicRecording} />}
-        {page === "history" && <HistoryPage snapshot={snapshot} setSnapshot={setSnapshot} />}
-        {page === "settings" && <SettingsPage snapshot={snapshot} updateSettings={updateSettings} setSnapshot={setSnapshot} />}
+        {page === "record" && <RecordPage snapshot={snapshot} permissionError={permissionError} toggleMicRecording={toggleMicRecording} t={t} />}
+        {page === "history" && <HistoryPage snapshot={snapshot} setSnapshot={setSnapshot} t={t} />}
+        {page === "settings" && <SettingsPage snapshot={snapshot} updateSettings={updateSettings} setSnapshot={setSnapshot} t={t} />}
       </main>
-      <RecordingHud recording={snapshot.recording} onOpenRecord={() => setPage("record")} />
+      <RecordingHud recording={snapshot.recording} onOpenRecord={() => setPage("record")} t={t} />
     </div>
   );
 }
 
-function modelActionNotice(kind: "download" | "start" | "stop" | "default") {
-  if (kind === "download") return "Preparing model files...";
-  if (kind === "start") return "Starting local model service...";
-  if (kind === "stop") return "Stopping model service...";
-  return "Updating model...";
+function modelActionNotice(kind: "download" | "start" | "stop" | "default", t: Translator) {
+  if (kind === "download") return t("notices.preparingModel");
+  if (kind === "start") return t("notices.startingModel");
+  if (kind === "stop") return t("notices.stoppingModel");
+  return t("notices.updatingModel");
 }
 
 function ModelPage({
@@ -243,7 +249,8 @@ function ModelPage({
   onStart,
   onStop,
   onDefault,
-  onConfigure
+  onConfigure,
+  t
 }: {
   snapshot: BriefInkSnapshot;
   busyModel: string | null;
@@ -253,30 +260,31 @@ function ModelPage({
   onStop: (id: string) => Promise<void>;
   onDefault: (id: string) => Promise<void>;
   onConfigure: (id: string, config: CloudProviderConfig) => Promise<void>;
+  t: Translator;
 }) {
   return (
     <section className="page">
       <PageHeader
-        eyebrow="Model"
-        title="Choose the voice model"
-        description="One default model powers hotkey transcription and the local API."
+        eyebrow={t("model.eyebrow")}
+        title={t("model.title")}
+        description={t("model.description")}
       />
 
       <div className="topPanel">
         <div>
-          <span className="label">Active Model</span>
+          <span className="label">{t("model.activeModel")}</span>
           <strong>{snapshot.models.find((model) => model.default)?.name}</strong>
         </div>
         <Select
-          label="Recognition Language"
+          label={t("model.recognitionLanguage")}
           value={snapshot.settings.language.recognitionLanguage}
-          options={languageOptions.filter((option) => option.value !== "same")}
+          options={languageOptions.filter((option) => option.value !== "same").map((option) => ({ value: option.value, label: t(option.labelKey) }))}
           onChange={(value) => updateSettings({ language: { ...snapshot.settings.language, recognitionLanguage: value as LanguageCode } })}
         />
         <Select
-          label="Output Language"
+          label={t("model.outputLanguage")}
           value={snapshot.settings.language.outputLanguage}
-          options={languageOptions.filter((option) => option.value !== "auto")}
+          options={languageOptions.filter((option) => option.value !== "auto").map((option) => ({ value: option.value, label: t(option.labelKey) }))}
           onChange={(value) => updateSettings({ language: { ...snapshot.settings.language, outputLanguage: value as LanguageCode } })}
         />
       </div>
@@ -292,6 +300,7 @@ function ModelPage({
             onStop={onStop}
             onDefault={onDefault}
             onConfigure={onConfigure}
+            t={t}
           />
         ))}
       </div>
@@ -306,7 +315,8 @@ function ModelCard({
   onStart,
   onStop,
   onDefault,
-  onConfigure
+  onConfigure,
+  t
 }: {
   model: SpeechModel;
   busy: boolean;
@@ -315,10 +325,11 @@ function ModelCard({
   onStop: (id: string) => Promise<void>;
   onDefault: (id: string) => Promise<void>;
   onConfigure: (id: string, config: CloudProviderConfig) => Promise<void>;
+  t: Translator;
 }) {
   const [openConfig, setOpenConfig] = useState(false);
   const isCloud = model.kind !== "local";
-  const statusText = modelStatusText(model, busy);
+  const statusText = modelStatusText(model, busy, t);
 
   return (
     <article className={model.default ? "modelCard selected" : "modelCard"}>
@@ -327,12 +338,12 @@ function ModelCard({
           <div className="modelName">{model.name}</div>
           <div className="muted">{model.kind.toUpperCase()} · {model.languageCapability} · {model.sizeLabel}</div>
         </div>
-        <StatusBadge status={model.status} />
+        <StatusBadge status={model.status} t={t} />
       </div>
 
       <div className="scoreRow">
-        <Metric label="Speed" value={model.speedScore} />
-        <Metric label="Accuracy" value={model.accuracyScore} />
+        <Metric label={t("model.speed")} value={model.speedScore} />
+        <Metric label={t("model.accuracy")} value={model.accuracyScore} />
       </div>
 
       <div className="modelRuntime">
@@ -344,28 +355,28 @@ function ModelCard({
       <div className="cardActions">
         {model.status === "running" ? (
           <button className="secondaryButton" disabled={busy} onClick={() => onStop(model.id)}>
-            <Square size={16} /> Stop
+            <Square size={16} /> {t("model.stop")}
           </button>
         ) : model.status === "not_installed" && !isCloud ? (
           <button className="primaryButton" disabled={busy} onClick={() => onDownload(model.id)}>
-            <RefreshCw size={16} /> Download
+            <RefreshCw size={16} /> {t("model.download")}
           </button>
         ) : (
           <button className="primaryButton" disabled={busy} onClick={() => onStart(model.id)}>
-            <PlayCircle size={16} /> Start
+            <PlayCircle size={16} /> {t("model.start")}
           </button>
         )}
         {isCloud && (
           <button className="ghostButton" onClick={() => setOpenConfig((value) => !value)}>
-            <KeyRound size={16} /> Configure
+            <KeyRound size={16} /> {t("model.configure")}
           </button>
         )}
         <button className="ghostButton" disabled={model.default} onClick={() => onDefault(model.id)}>
-          <Check size={16} /> {model.default ? "Selected" : "Use"}
+          <Check size={16} /> {model.default ? t("common.selected") : t("common.use")}
         </button>
       </div>
 
-      {openConfig && <ProviderConfigDialog model={model} onClose={() => setOpenConfig(false)} onConfigure={onConfigure} />}
+      {openConfig && <ProviderConfigDialog model={model} onClose={() => setOpenConfig(false)} onConfigure={onConfigure} t={t} />}
     </article>
   );
 }
@@ -373,11 +384,13 @@ function ModelCard({
 function ProviderConfigDialog({
   model,
   onClose,
-  onConfigure
+  onConfigure,
+  t
 }: {
   model: SpeechModel;
   onClose: () => void;
   onConfigure: (id: string, config: CloudProviderConfig) => Promise<void>;
+  t: Translator;
 }) {
   const [provider, setProvider] = useState(model.config?.provider ?? "Custom");
   const [baseUrl, setBaseUrl] = useState(model.config?.baseUrl ?? model.config?.endpoint ?? "");
@@ -387,19 +400,19 @@ function ProviderConfigDialog({
 
   return (
     <div className="modalBackdrop" role="presentation" onClick={onClose}>
-      <section className="configModal" role="dialog" aria-modal="true" aria-label="Provider configuration" onClick={(event) => event.stopPropagation()}>
+      <section className="configModal" role="dialog" aria-modal="true" aria-label={t("model.providerConfig")} onClick={(event) => event.stopPropagation()}>
         <header className="modalHeader">
           <div>
-            <span>Provider Configuration</span>
+            <span>{t("model.providerConfig")}</span>
             <h2>{model.name}</h2>
           </div>
-          <button className="iconButton smallIconButton" aria-label="Close" onClick={onClose}>
+          <button className="iconButton smallIconButton" aria-label={t("common.close")} onClick={onClose}>
             <X size={18} />
           </button>
         </header>
         <div className="modalGrid">
           <label>
-            Provider
+            {t("model.provider")}
             <select value={provider} onChange={(event) => setProvider(event.target.value)}>
               <option value="Custom">Custom</option>
               <option value="OpenAI">OpenAI</option>
@@ -408,24 +421,24 @@ function ProviderConfigDialog({
             </select>
           </label>
           <label>
-            Base URL
+            {t("model.baseUrl")}
             <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com" />
           </label>
           <label>
-            API Key
+            {t("model.apiKey")}
             <input value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder="sk-..." type="password" />
           </label>
           <label>
-            Model Name
+            {t("model.modelName")}
             <input value={modelName} onChange={(event) => setModelName(event.target.value)} placeholder="whisper-large-v3-turbo" />
           </label>
           <label>
-            Timeout
+            {t("model.timeout")}
             <input type="number" min={1000} step={1000} value={timeoutMs} onChange={(event) => setTimeoutMs(Number(event.target.value) || 120000)} />
           </label>
         </div>
         <div className="modalActions">
-          <button className="ghostButton" onClick={onClose}>Cancel</button>
+          <button className="ghostButton" onClick={onClose}>{t("common.cancel")}</button>
           <button
             className="primaryButton"
             onClick={async () => {
@@ -433,7 +446,7 @@ function ProviderConfigDialog({
               onClose();
             }}
           >
-            Save
+            {t("common.save")}
           </button>
         </div>
       </section>
@@ -444,50 +457,52 @@ function ProviderConfigDialog({
 function RecordPage({
   snapshot,
   permissionError,
-  toggleMicRecording
+  toggleMicRecording,
+  t
 }: {
   snapshot: BriefInkSnapshot;
   permissionError: string | null;
   toggleMicRecording: () => Promise<void>;
+  t: Translator;
 }) {
   const elapsed = useElapsedSeconds(snapshot.recording);
 
   return (
     <section className="page">
-      <PageHeader eyebrow="Record" title="Speak, stop, copy" description="Use Option + Space anywhere, or record from this page." />
+      <PageHeader eyebrow={t("record.eyebrow")} title={t("record.title")} description={t("record.description")} />
       <div className="recordLayout">
         <div className="recordPanel">
           <div className={`pulse ${snapshot.recording.status}`}><Radio size={34} /></div>
           <Waveform active={snapshot.recording.status === "recording"} />
-          <h2>{recordingTitle(snapshot.recording)}</h2>
+          <h2>{recordingTitle(snapshot.recording, t)}</h2>
           <p>{snapshot.recording.modelName}</p>
           <div className="recordTimer">{formatDuration(elapsed)}</div>
           <button className={snapshot.recording.status === "recording" ? "dangerButton" : "primaryButton large"} onClick={toggleMicRecording}>
             {snapshot.recording.status === "recording" ? <PauseCircle size={20} /> : <Mic size={20} />}
-            {snapshot.recording.status === "recording" ? "Stop Recording" : "Start Recording"}
+            {snapshot.recording.status === "recording" ? t("record.stop") : t("record.start")}
           </button>
           {permissionError && <div className="errorText">{permissionError}</div>}
         </div>
         <div className="resultPanel">
           <div className="resultHeader">
-            <span className="label">Latest Result</span>
+            <span className="label">{t("record.latestResult")}</span>
             {snapshot.recording.lastResult && (
               <button
                 className="ghostButton compactButton"
                 onClick={() => navigator.clipboard.writeText(snapshot.recording.lastResult?.translatedText ?? snapshot.recording.lastResult?.text ?? "")}
               >
-                <Clipboard size={15} /> Copy
+                <Clipboard size={15} /> {t("common.copy")}
               </button>
             )}
           </div>
           <div className={snapshot.recording.lastResult ? "resultText hasResult" : "resultText"}>
             {snapshot.recording.status === "transcribing"
-              ? "Transcribing audio..."
-              : snapshot.recording.lastResult?.translatedText ?? snapshot.recording.lastResult?.text ?? "No transcription yet."}
+              ? t("record.transcribing")
+              : snapshot.recording.lastResult?.translatedText ?? snapshot.recording.lastResult?.text ?? t("record.empty")}
           </div>
           {snapshot.recording.lastResult?.translatedText && (
             <>
-              <span className="label">Original</span>
+              <span className="label">{t("record.original")}</span>
               <div className="sourceText">{snapshot.recording.lastResult.text}</div>
             </>
           )}
@@ -497,7 +512,7 @@ function RecordPage({
   );
 }
 
-function HistoryPage({ snapshot, setSnapshot }: { snapshot: BriefInkSnapshot; setSnapshot: React.Dispatch<React.SetStateAction<BriefInkSnapshot | null>> }) {
+function HistoryPage({ snapshot, setSnapshot, t }: { snapshot: BriefInkSnapshot; setSnapshot: React.Dispatch<React.SetStateAction<BriefInkSnapshot | null>>; t: Translator }) {
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftText, setDraftText] = useState("");
@@ -505,14 +520,14 @@ function HistoryPage({ snapshot, setSnapshot }: { snapshot: BriefInkSnapshot; se
 
   async function clearHistory() {
     if (!snapshot.history.length) return;
-    if (!window.confirm("Clear all history records and their saved audio files?")) return;
+    if (!window.confirm(t("history.confirmClear"))) return;
     const history = await window.briefInk.clearHistory();
     setSnapshot((current) => (current ? { ...current, history } : current));
     setSelectedIds([]);
   }
 
   async function deleteHistory(id: string) {
-    if (!window.confirm("Delete this history record and its saved audio file?")) return;
+    if (!window.confirm(t("history.confirmDelete"))) return;
     const history = await window.briefInk.deleteHistory(id);
     setSnapshot((current) => (current ? { ...current, history } : current));
     setSelectedIds((current) => current.filter((selectedId) => selectedId !== id));
@@ -520,7 +535,7 @@ function HistoryPage({ snapshot, setSnapshot }: { snapshot: BriefInkSnapshot; se
 
   async function deleteSelected() {
     if (!selectedIds.length) return;
-    if (!window.confirm(`Delete ${selectedIds.length} selected history records and their saved audio files?`)) return;
+    if (!window.confirm(t("history.confirmDeleteSelected", { count: selectedIds.length }))) return;
     const history = await window.briefInk.deleteHistoryMany(selectedIds);
     setSnapshot((current) => (current ? { ...current, history } : current));
     setSelectedIds([]);
@@ -549,47 +564,47 @@ function HistoryPage({ snapshot, setSnapshot }: { snapshot: BriefInkSnapshot; se
 
   return (
     <section className="page">
-      <PageHeader eyebrow="History" title="Recent text history" description="History is optional and controlled from Settings." />
+      <PageHeader eyebrow={t("history.eyebrow")} title={t("history.title")} description={t("history.description")} />
       <div className="historyToolbar">
         <div className="historyMeta">
-          <span>{snapshot.history.length} records</span>
-          {selectedIds.length > 0 && <strong>{selectedIds.length} selected</strong>}
+          <span>{snapshot.history.length} {t("history.records")}</span>
+          {selectedIds.length > 0 && <strong>{selectedIds.length} {t("history.selected")}</strong>}
         </div>
         <div className="toolbarActions">
           <button className="ghostButton" onClick={() => void window.briefInk.openRecordingsDirectory()}>
-            <FolderOpen size={16} /> Audio Folder
+            <FolderOpen size={16} /> {t("history.audioFolder")}
           </button>
           <button className="ghostButton" disabled={!selectedIds.length} onClick={deleteSelected}>
-            <Trash2 size={16} /> Delete Selected
+            <Trash2 size={16} /> {t("history.deleteSelected")}
           </button>
           <button className="ghostButton" onClick={clearHistory}>
-            <Trash2 size={16} /> Clear
+            <Trash2 size={16} /> {t("common.clear")}
           </button>
         </div>
       </div>
       <div className="historyList">
         {snapshot.history.length === 0 ? (
-          <div className="emptyState">No saved history. Enable text history in Settings when you want a local trail.</div>
+          <div className="emptyState">{t("history.empty")}</div>
         ) : (
           snapshot.history.map((entry) => (
             <article className="historyItem" key={entry.id}>
-              <input className="historyCheckbox" type="checkbox" checked={selectedIds.includes(entry.id)} onChange={() => toggleSelected(entry.id)} aria-label="Select history record" />
+              <input className="historyCheckbox" type="checkbox" checked={selectedIds.includes(entry.id)} onChange={() => toggleSelected(entry.id)} aria-label={t("history.selectRecord")} />
               <div className="historyContent">
                 <strong>{entry.modelName}</strong>
                 <span>{new Date(entry.createdAt).toLocaleString()} · {entry.duration.toFixed(1)}s</span>
                 {editingId === entry.id ? (
                   <div className="editStack">
                     <label>
-                      Text
+                      {t("history.text")}
                       <textarea value={draftText} onChange={(event) => setDraftText(event.target.value)} />
                     </label>
                     <label>
-                      Translated Text
-                      <textarea value={draftTranslatedText} onChange={(event) => setDraftTranslatedText(event.target.value)} placeholder="Optional" />
+                      {t("history.translatedText")}
+                      <textarea value={draftTranslatedText} onChange={(event) => setDraftTranslatedText(event.target.value)} placeholder={t("history.optional")} />
                     </label>
                     <div className="inlineActions">
-                      <button className="primaryButton" onClick={() => void saveEdit(entry.id)}>Save</button>
-                      <button className="ghostButton" onClick={() => setEditingId(null)}>Cancel</button>
+                      <button className="primaryButton" onClick={() => void saveEdit(entry.id)}>{t("common.save")}</button>
+                      <button className="ghostButton" onClick={() => setEditingId(null)}>{t("common.cancel")}</button>
                     </div>
                   </div>
                 ) : (
@@ -597,18 +612,18 @@ function HistoryPage({ snapshot, setSnapshot }: { snapshot: BriefInkSnapshot; se
                 )}
                 {entry.audioPath && (
                   <audio className="historyAudio" controls src={filePathToUrl(entry.audioPath)}>
-                    Audio playback is not available in this browser.
+                    {t("history.audioUnavailable")}
                   </audio>
                 )}
               </div>
               <div className="historyActions">
-                <button className="iconButton" aria-label="Copy text" onClick={() => navigator.clipboard.writeText(entry.translatedText ?? entry.text)}>
+                <button className="iconButton" aria-label={t("common.copy")} onClick={() => navigator.clipboard.writeText(entry.translatedText ?? entry.text)}>
                   <Clipboard size={18} />
                 </button>
-                <button className="iconButton" aria-label="Edit text" onClick={() => startEdit(entry)}>
+                <button className="iconButton" aria-label={t("common.edit")} onClick={() => startEdit(entry)}>
                   <Edit3 size={18} />
                 </button>
-                <button className="iconButton" aria-label="Delete record" onClick={() => void deleteHistory(entry.id)}>
+                <button className="iconButton" aria-label={t("common.delete")} onClick={() => void deleteHistory(entry.id)}>
                   <Trash2 size={18} />
                 </button>
               </div>
@@ -623,18 +638,20 @@ function HistoryPage({ snapshot, setSnapshot }: { snapshot: BriefInkSnapshot; se
 function SettingsPage({
   snapshot,
   updateSettings,
-  setSnapshot
+  setSnapshot,
+  t
 }: {
   snapshot: BriefInkSnapshot;
   updateSettings: (patch: Partial<AppSettings>) => Promise<void>;
   setSnapshot: React.Dispatch<React.SetStateAction<BriefInkSnapshot | null>>;
+  t: Translator;
 }) {
   const settings = snapshot.settings;
   const [capturingHotkey, setCapturingHotkey] = useState(false);
   const [pendingHotkey, setPendingHotkey] = useState<string | null>(null);
   const [microphoneAccess, setMicrophoneAccess] = useState<string>("unknown");
   const [accessibilityAccess, setAccessibilityAccess] = useState<boolean>(false);
-  const [audioDevices, setAudioDevices] = useState<AudioDeviceOption[]>([{ deviceId: "default", label: "System Default" }]);
+  const [audioDevices, setAudioDevices] = useState<AudioDeviceOption[]>([{ deviceId: "default", label: t("settings.systemDefault") }]);
 
   const refreshAudioDevices = useCallback(async () => {
     const access = await window.briefInk.getMicrophoneAccess();
@@ -650,10 +667,10 @@ function SettingsPage({
       .filter((device) => device.kind === "audioinput")
       .map((device, index) => ({
         deviceId: device.deviceId,
-        label: device.label || `Microphone ${index + 1}`
+        label: device.label || t("settings.microphoneDevice", { index: index + 1 })
       }));
-    setAudioDevices([{ deviceId: "default", label: "System Default" }, ...inputs]);
-  }, []);
+    setAudioDevices([{ deviceId: "default", label: t("settings.systemDefault") }, ...inputs]);
+  }, [t]);
 
   useEffect(() => {
     if (!capturingHotkey) return;
@@ -673,135 +690,139 @@ function SettingsPage({
 
   return (
     <section className="page">
-      <PageHeader eyebrow="Settings" title="Control the workflow" description="Keep privacy and local API behavior explicit." />
+      <PageHeader eyebrow={t("settings.eyebrow")} title={t("settings.title")} description={t("settings.description")} />
       <div className="settingsGrid">
-        <SettingsGroup title="Hotkey">
-          <div className="hotkeyCapture">
-            <span>Start / Stop Recording</span>
-            <button className={capturingHotkey ? "hotkeyButton capturing" : "hotkeyButton"} onClick={() => setCapturingHotkey(true)}>
-              {capturingHotkey ? pendingHotkey ?? "Press a key combination..." : settings.hotkey}
-            </button>
-            {capturingHotkey && (
-              <div className="hotkeyActions">
-                <button
-                  className="primaryButton"
-                  disabled={!pendingHotkey}
-                  onClick={async () => {
-                    if (!pendingHotkey) return;
-                    await updateSettings({ hotkey: pendingHotkey });
-                    setCapturingHotkey(false);
-                    setPendingHotkey(null);
-                  }}
-                >
-                  Confirm
-                </button>
-                <button
-                  className="ghostButton"
-                  onClick={() => {
-                    setCapturingHotkey(false);
-                    setPendingHotkey(null);
-                  }}
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-          </div>
-        </SettingsGroup>
-        <SettingsGroup title="Recording">
-          <label>
-            Input Device
-            <select
-              value={settings.recording.inputDeviceId}
-              onChange={(event) => updateSettings({ recording: { ...settings.recording, inputDeviceId: event.target.value } })}
-            >
-              {audioDevices.map((device) => (
-                <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Max Duration
-            <input
-              type="number"
-              min={1}
-              max={3600}
-              value={settings.recording.maxDurationSeconds}
-              onChange={(event) => updateSettings({ recording: { ...settings.recording, maxDurationSeconds: Number(event.target.value) || 600 } })}
+        <div className="settingsColumn">
+          <SettingsGroup title={t("settings.hotkey")}>
+            <div className="hotkeyCapture">
+              <span>{t("settings.startStopRecording")}</span>
+              <button className={capturingHotkey ? "hotkeyButton capturing" : "hotkeyButton"} onClick={() => setCapturingHotkey(true)}>
+                {capturingHotkey ? pendingHotkey ?? t("settings.pressCombination") : settings.hotkey}
+              </button>
+              {capturingHotkey && (
+                <div className="hotkeyActions">
+                  <button
+                    className="primaryButton"
+                    disabled={!pendingHotkey}
+                    onClick={async () => {
+                      if (!pendingHotkey) return;
+                      await updateSettings({ hotkey: pendingHotkey });
+                      setCapturingHotkey(false);
+                      setPendingHotkey(null);
+                    }}
+                  >
+                    {t("settings.confirm")}
+                  </button>
+                  <button
+                    className="ghostButton"
+                    onClick={() => {
+                      setCapturingHotkey(false);
+                      setPendingHotkey(null);
+                    }}
+                  >
+                    {t("common.cancel")}
+                  </button>
+                </div>
+              )}
+            </div>
+          </SettingsGroup>
+          <SettingsGroup title={t("settings.output")}>
+            <Toggle label={t("settings.copyClipboard")} checked={settings.output.autoCopy} onChange={(autoCopy) => updateSettings({ output: { ...settings.output, autoCopy } })} />
+            <Toggle
+              label={t("settings.pasteFrontmost")}
+              checked={settings.output.autoPaste}
+              onChange={async (autoPaste) => {
+                if (autoPaste) {
+                  const granted = await window.briefInk.requestAccessibilityAccess();
+                  setAccessibilityAccess(granted);
+                  if (!granted) return;
+                }
+                await updateSettings({ output: { ...settings.output, autoPaste } });
+              }}
             />
-          </label>
-          <div className="permissionRow">
-            <span>Microphone: {microphoneAccess}</span>
-            <button className="ghostButton" onClick={() => void refreshAudioDevices()}>
-              <RefreshCw size={16} /> Refresh
+            <Toggle label={t("settings.showNotification")} checked={settings.output.showNotification} onChange={(showNotification) => updateSettings({ output: { ...settings.output, showNotification } })} />
+            <div className="permissionRow">
+              <span>{t("settings.accessibility")}: {accessibilityAccess ? t("settings.granted") : t("settings.accessibilityNeeded")}</span>
+              <button className="ghostButton" onClick={async () => setAccessibilityAccess(await window.briefInk.requestAccessibilityAccess())}>
+                <RefreshCw size={16} /> {t("common.refresh")}
+              </button>
+            </div>
+          </SettingsGroup>
+          <SettingsGroup title={t("settings.localApi")}>
+            <Toggle
+              label={t("settings.enableApi")}
+              checked={settings.localApi.enabled}
+              onChange={async (enabled) => {
+                const next = enabled ? await window.briefInk.startLocalApi() : await window.briefInk.stopLocalApi();
+                setSnapshot((current) => (current ? { ...current, settings: next, localApiRunning: enabled } : current));
+              }}
+            />
+            <label>
+              {t("settings.endpoint")}
+              <input readOnly value={`http://${settings.localApi.host}:${settings.localApi.port}/v1/audio/transcriptions`} />
+            </label>
+            <label>
+              {t("settings.apiKey")}
+              <input readOnly value={settings.localApi.apiKey} />
+            </label>
+            <div className="apiStatus"><Server size={16} /> {snapshot.localApiRunning ? `${t("common.running")} 127.0.0.1` : t("common.stopped")}</div>
+          </SettingsGroup>
+        </div>
+        <div className="settingsColumn">
+          <SettingsGroup title={t("settings.recording")}>
+            <label>
+              {t("settings.inputDevice")}
+              <select
+                value={settings.recording.inputDeviceId}
+                onChange={(event) => updateSettings({ recording: { ...settings.recording, inputDeviceId: event.target.value } })}
+              >
+                {audioDevices.map((device) => (
+                  <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              {t("settings.maxDuration")}
+              <input
+                type="number"
+                min={1}
+                max={3600}
+                value={settings.recording.maxDurationSeconds}
+                onChange={(event) => updateSettings({ recording: { ...settings.recording, maxDurationSeconds: Number(event.target.value) || 600 } })}
+              />
+            </label>
+            <div className="permissionRow">
+              <span>{t("settings.microphone")}: {microphoneAccess === "granted" ? t("settings.granted") : microphoneAccess}</span>
+              <button className="ghostButton" onClick={() => void refreshAudioDevices()}>
+                <RefreshCw size={16} /> {t("common.refresh")}
+              </button>
+            </div>
+          </SettingsGroup>
+          <SettingsGroup title={t("settings.history")}>
+            <Toggle label={t("settings.saveTextHistory")} checked={settings.history.saveHistory} onChange={(saveHistory) => updateSettings({ history: { ...settings.history, saveHistory } })} />
+            <Toggle label={t("settings.saveAudioFiles")} checked={settings.history.saveAudio} onChange={(saveAudio) => updateSettings({ history: { ...settings.history, saveAudio } })} />
+          </SettingsGroup>
+          <SettingsGroup title={t("settings.diagnostics")}>
+            <label>
+              {t("settings.language")}
+              <select
+                value={settings.appearance?.language ?? "en"}
+                onChange={(event) => updateSettings({ appearance: { language: event.target.value as "en" | "zh-CN" } })}
+              >
+                <option value="en">{t("settings.english")}</option>
+                <option value="zh-CN">{t("settings.simplifiedChinese")}</option>
+              </select>
+            </label>
+            <div className="versionRow">
+              <span>{t("settings.version")}</span>
+              <strong>{snapshot.appVersion}</strong>
+            </div>
+            <button className="ghostButton wideButton" onClick={() => void window.briefInk.openLogsDirectory()}>
+              <FolderOpen size={16} /> {t("settings.openLogs")}
             </button>
-          </div>
-        </SettingsGroup>
-        <SettingsGroup title="Output">
-          <Toggle label="Copy to clipboard" checked={settings.output.autoCopy} onChange={(autoCopy) => updateSettings({ output: { ...settings.output, autoCopy } })} />
-          <Toggle
-            label="Paste into frontmost app"
-            checked={settings.output.autoPaste}
-            onChange={async (autoPaste) => {
-              if (autoPaste) {
-                const granted = await window.briefInk.requestAccessibilityAccess();
-                setAccessibilityAccess(granted);
-                if (!granted) return;
-              }
-              await updateSettings({ output: { ...settings.output, autoPaste } });
-            }}
-          />
-          <Toggle label="Show notification" checked={settings.output.showNotification} onChange={(showNotification) => updateSettings({ output: { ...settings.output, showNotification } })} />
-          <div className="permissionRow">
-            <span>Accessibility: {accessibilityAccess ? "granted" : "needed for auto paste"}</span>
-            <button className="ghostButton" onClick={async () => setAccessibilityAccess(await window.briefInk.requestAccessibilityAccess())}>
-              <RefreshCw size={16} /> Check
-            </button>
-          </div>
-        </SettingsGroup>
-        <SettingsGroup title="History">
-          <Toggle label="Save text history" checked={settings.history.saveHistory} onChange={(saveHistory) => updateSettings({ history: { ...settings.history, saveHistory } })} />
-          <Toggle label="Save audio files" checked={settings.history.saveAudio} onChange={(saveAudio) => updateSettings({ history: { ...settings.history, saveAudio } })} />
-        </SettingsGroup>
-        <SettingsGroup title="Local API">
-          <Toggle
-            label="Enable API server"
-            checked={settings.localApi.enabled}
-            onChange={async (enabled) => {
-              const next = enabled ? await window.briefInk.startLocalApi() : await window.briefInk.stopLocalApi();
-              setSnapshot((current) => (current ? { ...current, settings: next, localApiRunning: enabled } : current));
-            }}
-          />
-          <label>
-            Endpoint
-            <input readOnly value={`http://${settings.localApi.host}:${settings.localApi.port}/v1/audio/transcriptions`} />
-          </label>
-          <label>
-            API Key
-            <input readOnly value={settings.localApi.apiKey} />
-          </label>
-          <div className="apiStatus"><Server size={16} /> {snapshot.localApiRunning ? "Running on 127.0.0.1" : "Stopped"}</div>
-        </SettingsGroup>
-        <SettingsGroup title="Diagnostics">
-          <label>
-            Language
-            <select
-              value={settings.appearance?.language ?? "en"}
-              onChange={(event) => updateSettings({ appearance: { language: event.target.value as "en" | "zh-CN" } })}
-            >
-              <option value="en">English</option>
-              <option value="zh-CN">中文简体</option>
-            </select>
-          </label>
-          <div className="versionRow">
-            <span>Version</span>
-            <strong>{snapshot.appVersion}</strong>
-          </div>
-          <button className="ghostButton wideButton" onClick={() => void window.briefInk.openLogsDirectory()}>
-            <FolderOpen size={16} /> Open logs folder
-          </button>
-          <div className="hintText">Logs are written to the app data directory and rotate at 2 MB.</div>
-        </SettingsGroup>
+            <div className="hintText">{t("settings.logsHint")}</div>
+          </SettingsGroup>
+        </div>
       </div>
     </section>
   );
@@ -837,8 +858,8 @@ function Metric({ label, value }: { label: string; value: number }) {
   );
 }
 
-function StatusBadge({ status }: { status: string }) {
-  return <span className={`status ${status}`}>{status.replace("_", " ")}</span>;
+function StatusBadge({ status, t }: { status: string; t: Translator }) {
+  return <span className={`status ${status}`}>{t(`status.${status}` as MessageKey)}</span>;
 }
 
 function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (checked: boolean) => void }) {
@@ -859,26 +880,26 @@ function SettingsGroup({ title, children }: { title: string; children: React.Rea
   );
 }
 
-function recordingTitle(state: RecordingState) {
-  if (state.status === "recording") return "Recording...";
-  if (state.status === "transcribing") return "Transcribing...";
-  if (state.status === "completed") return "Copied to clipboard";
-  if (state.status === "error") return state.error ?? "Something went wrong";
-  return "Ready";
+function recordingTitle(state: RecordingState, t: Translator) {
+  if (state.status === "recording") return t("recording.recording");
+  if (state.status === "transcribing") return t("recording.transcribing");
+  if (state.status === "completed") return t("recording.completed");
+  if (state.status === "error") return state.error ?? t("recording.error");
+  return t("recording.ready");
 }
 
-function modelStatusText(model: SpeechModel, busy: boolean) {
-  if (busy && model.status === "not_installed") return "Downloading model file and preparing runtime...";
-  if (busy) return "Applying model state change...";
-  if (model.status === "running") return model.engine === "whisper.cpp" ? "Ready for local transcription" : "Running";
-  if (model.status === "installed") return model.runtimeNote ?? "Configured and ready to start";
-  if (model.status === "stopped") return "Stopped";
-  if (model.status === "not_installed") return model.downloadUrl ? "Model file has not been downloaded" : "Not configured";
-  if (model.status === "downloading") return "Downloading...";
-  return model.error ?? "Needs attention";
+function modelStatusText(model: SpeechModel, busy: boolean, t: Translator) {
+  if (busy && model.status === "not_installed") return t("model.downloading");
+  if (busy) return t("model.applying");
+  if (model.status === "running") return model.engine === "whisper.cpp" ? t("model.readyLocal") : t("common.running");
+  if (model.status === "installed") return model.runtimeNote ?? t("model.installed");
+  if (model.status === "stopped") return t("common.stopped");
+  if (model.status === "not_installed") return model.downloadUrl ? t("model.notInstalled") : t("common.notConfigured");
+  if (model.status === "downloading") return t("model.downloading");
+  return model.error ?? t("common.needsAttention");
 }
 
-function RecordingHud({ recording, onOpenRecord }: { recording: RecordingState; onOpenRecord: () => void }) {
+function RecordingHud({ recording, onOpenRecord, t }: { recording: RecordingState; onOpenRecord: () => void; t: Translator }) {
   const elapsed = useElapsedSeconds(recording);
   const [visible, setVisible] = useState(false);
 
@@ -902,7 +923,7 @@ function RecordingHud({ recording, onOpenRecord }: { recording: RecordingState; 
         {recording.status === "recording" ? <Mic size={18} /> : recording.status === "transcribing" ? <RefreshCw size={18} /> : <Check size={18} />}
       </div>
       <div>
-        <strong>{recordingTitle(recording)}</strong>
+        <strong>{recordingTitle(recording, t)}</strong>
         <span>{recording.status === "recording" ? formatDuration(elapsed) : recording.modelName ?? "BriefInk"}</span>
       </div>
       {recording.status === "recording" && <Waveform active compact />}

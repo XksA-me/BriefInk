@@ -22,6 +22,7 @@ const api: BriefInkApi = {
   stopRecording: () => ipcRenderer.invoke("recording:stop"),
   toggleRecording: () => ipcRenderer.invoke("recording:toggle"),
   transcribeBlob: (audio: ArrayBuffer, mimeType: string) => ipcRenderer.invoke("recording:transcribeBlob", audio, mimeType),
+  reportRecordingError: (message: string) => ipcRenderer.invoke("recording:reportError", message),
   getMicrophoneAccess: () => ipcRenderer.invoke("permissions:getMicrophoneAccess"),
   requestMicrophoneAccess: () => ipcRenderer.invoke("permissions:requestMicrophoneAccess"),
   getAccessibilityAccess: () => ipcRenderer.invoke("permissions:getAccessibilityAccess"),

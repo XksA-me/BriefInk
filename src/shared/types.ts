@@ -272,6 +272,7 @@ export interface BriefInkApi {
   stopRecording(): Promise<RecordingState>;
   toggleRecording(): Promise<RecordingState>;
   transcribeBlob(audio: ArrayBuffer, mimeType: string): Promise<RecordingState>;
+  reportRecordingError(message: string): Promise<RecordingState>;
   getMicrophoneAccess(): Promise<"granted" | "denied" | "restricted" | "not-determined" | "unknown">;
   requestMicrophoneAccess(): Promise<boolean>;
   getAccessibilityAccess(): Promise<boolean>;
