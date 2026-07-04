@@ -18,7 +18,7 @@ const models: SpeechModel[] = [
   },
   {
     id: "custom-openai-compatible",
-    name: "Custom OpenAI-compatible",
+    name: "Third-party Speech API",
     kind: "custom",
     languageCapability: "multilingual",
     sizeLabel: "Custom",
@@ -59,9 +59,11 @@ let snapshot: AppSnapshot = {
 };
 
 const listeners = new Set<(state: RecordingState) => void>();
+const modelListeners = new Set<(models: SpeechModel[]) => void>();
 
 function updateModels(next: SpeechModel[]) {
   snapshot = { ...snapshot, models: next };
+  modelListeners.forEach((listener) => listener(structuredClone(next)));
   return next;
 }
 
@@ -97,7 +99,30 @@ export function installBrowserMockApi() {
       return structuredClone(snapshot.models);
     },
     async downloadModel(modelId: string) {
-      return updateModels(snapshot.models.map((model) => (model.id === modelId ? { ...model, status: "running" } : model)));
+      updateModels(snapshot.models.map((model) =>
+        model.id === modelId
+          ? { ...model, status: "downloading", downloadProgress: { receivedBytes: 0, totalBytes: 574041195, percent: 0 } }
+          : model
+      ));
+      for (const percent of [18, 42, 68, 91, 100]) {
+        await new Promise((resolve) => setTimeout(resolve, 120));
+        updateModels(snapshot.models.map((model) =>
+          model.id === modelId
+            ? {
+                ...model,
+                status: "downloading",
+                downloadProgress: {
+                  receivedBytes: Math.round(574041195 * (percent / 100)),
+                  totalBytes: 574041195,
+                  percent
+                }
+              }
+            : model
+        ));
+      }
+      return updateModels(snapshot.models.map((model) =>
+        model.id === modelId ? { ...model, status: "installed", downloadProgress: undefined } : model
+      ));
     },
     async startModel(modelId: string) {
       return updateModels(snapshot.models.map((model) => (model.id === modelId ? { ...model, status: "running" } : model)));
@@ -199,6 +224,10 @@ export function installBrowserMockApi() {
     },
     async openLogsDirectory() {
       console.info("BriefInk preview: logs folder is only available in the Electron app.");
+    },
+    onModelsChanged(callback) {
+      modelListeners.add(callback);
+      return () => modelListeners.delete(callback);
     },
     onRecordingState(callback) {
       listeners.add(callback);

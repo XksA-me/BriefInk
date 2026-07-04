@@ -26,7 +26,7 @@ const initialModels: SpeechModel[] = [
   },
   {
     id: "custom-openai-compatible",
-    name: "Custom OpenAI-compatible",
+    name: "Third-party Speech API",
     kind: "custom",
     languageCapability: "multilingual",
     sizeLabel: "Custom",
@@ -40,6 +40,7 @@ const initialModels: SpeechModel[] = [
 
 export class ModelManager {
   private models = clone(initialModels);
+  private onChange?: (models: SpeechModel[]) => void;
 
   constructor(
     private readonly modelDirectory = join(process.cwd(), ".briefink-models"),
@@ -54,6 +55,10 @@ export class ModelManager {
 
   list(): SpeechModel[] {
     return clone(this.models);
+  }
+
+  setOnChange(listener: (models: SpeechModel[]) => void): void {
+    this.onChange = listener;
   }
 
   get(modelId: string): SpeechModel | undefined {
@@ -72,9 +77,29 @@ export class ModelManager {
       this.setStatus(modelId, "error", { error: model.runtimeNote ?? "This model runtime is not implemented yet." });
       return this.list();
     }
-    this.setStatus(modelId, "downloading");
-    await downloadFile(model.downloadUrl, model.localPath, model.expectedBytes, model.expectedSha256);
-    this.setStatus(modelId, "installed", { managedByBriefInk: false, error: undefined });
+    this.setStatus(modelId, "downloading", {
+      downloadProgress: { receivedBytes: 0, totalBytes: model.expectedBytes, percent: 0 },
+      error: undefined
+    }, { persist: false });
+    let lastProgressUpdate = 0;
+    let lastPercent = -1;
+    try {
+      await downloadFile(model.downloadUrl, model.localPath, model.expectedBytes, model.expectedSha256, (progress) => {
+        const now = Date.now();
+        const percent = progress.percent ?? -1;
+        if (percent === lastPercent && now - lastProgressUpdate < 350) return;
+        lastPercent = percent;
+        lastProgressUpdate = now;
+        this.setStatus(modelId, "downloading", { downloadProgress: progress, error: undefined }, { persist: false });
+      });
+    } catch (error) {
+      this.setStatus(modelId, "error", {
+        error: error instanceof Error ? error.message : "Model download failed.",
+        downloadProgress: undefined
+      });
+      throw error;
+    }
+    this.setStatus(modelId, "installed", { managedByBriefInk: false, error: undefined, downloadProgress: undefined });
     logger.info("Model download completed", { modelId });
     return this.list();
   }
@@ -90,25 +115,25 @@ export class ModelManager {
       return this.download(modelId);
     }
     if (model.engine === "whisper.cpp" && model.localPath && !existsSync(model.localPath)) {
-      this.setStatus(modelId, "error", { error: "Model file is missing. Download it first." });
+      this.setStatus(modelId, "error", { error: "Model file is missing. Download it first.", downloadProgress: undefined });
       return this.list();
     }
     if (model.engine === "whisper.cpp" && !(await hasWhisperCppRuntime())) {
-      this.setStatus(modelId, "error", { error: "BriefInk could not find its bundled transcription runtime. Reinstall BriefInk or download a fresh build." });
+      this.setStatus(modelId, "error", { error: "BriefInk could not find its bundled transcription runtime. Reinstall BriefInk or download a fresh build.", downloadProgress: undefined });
       return this.list();
     }
     const runtimePath = await getWhisperRuntimePath();
     if (!runtimePath?.includes("whisper-cli")) {
-      this.setStatus(modelId, "error", { error: "BriefInk found an old transcription runtime. Reinstall BriefInk or download a fresh build." });
+      this.setStatus(modelId, "error", { error: "BriefInk found an old transcription runtime. Reinstall BriefInk or download a fresh build.", downloadProgress: undefined });
       return this.list();
     }
-    this.setStatus(modelId, "running", { managedByBriefInk: model.kind === "local", error: undefined });
+    this.setStatus(modelId, "running", { managedByBriefInk: model.kind === "local", error: undefined, downloadProgress: undefined });
     return this.list();
   }
 
   async stop(modelId: string): Promise<SpeechModel[]> {
     logger.info("Model stop requested", { modelId });
-    this.setStatus(modelId, "stopped", { managedByBriefInk: false });
+    this.setStatus(modelId, "stopped", { managedByBriefInk: false, downloadProgress: undefined });
     return this.list();
   }
 
@@ -118,6 +143,7 @@ export class ModelManager {
       model.managedByBriefInk ? { ...model, status: "stopped", managedByBriefInk: false } : model
     );
     this.persistState();
+    this.notifyChange();
   }
 
   setDefault(modelId: string): SpeechModel[] {
@@ -125,6 +151,7 @@ export class ModelManager {
     logger.info("Default model changed", { modelId });
     this.models = this.models.map((model) => ({ ...model, default: model.id === modelId }));
     this.persistState();
+    this.notifyChange();
     return this.list();
   }
 
@@ -138,9 +165,10 @@ export class ModelManager {
       modelName: config.modelName ?? config.model
     });
     this.models = this.models.map((model) =>
-      model.id === modelId ? { ...model, config, status: "installed", error: undefined } : model
+      model.id === modelId ? { ...model, config, status: "installed", error: undefined, downloadProgress: undefined } : model
     );
     this.persistState();
+    this.notifyChange();
     return this.list();
   }
 
@@ -150,10 +178,20 @@ export class ModelManager {
     return model;
   }
 
-  private setStatus(modelId: string, status: ModelStatus, patch: Partial<SpeechModel> = {}): void {
+  private setStatus(
+    modelId: string,
+    status: ModelStatus,
+    patch: Partial<SpeechModel> = {},
+    options: { persist?: boolean } = {}
+  ): void {
     this.require(modelId);
     this.models = this.models.map((model) => (model.id === modelId ? { ...model, status, ...patch } : model));
-    this.persistState();
+    if (options.persist !== false) this.persistState();
+    this.notifyChange();
+  }
+
+  private notifyChange(): void {
+    this.onChange?.(this.list());
   }
 
   private withLocalPath(model: SpeechModel): SpeechModel {

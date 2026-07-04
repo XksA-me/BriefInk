@@ -376,9 +376,14 @@ button:focus-visible {
   box-shadow: 0 0 0 4px rgba(249, 115, 22, 0.12);
 }
 
+.downloadProgress {
+  display: grid;
+  gap: 7px;
+  margin: -4px 0 14px;
+}
+
 .progressRail {
   height: 4px;
-  margin: -4px 0 14px;
   overflow: hidden;
   background: #e2e8f0;
   border-radius: 999px;
@@ -390,7 +395,16 @@ button:focus-visible {
   height: 100%;
   background: #0d9488;
   border-radius: inherit;
-  animation: railSlide 900ms ease-in-out infinite alternate;
+  transition: width 180ms ease;
+}
+
+.progressMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: #64748b;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .metric {

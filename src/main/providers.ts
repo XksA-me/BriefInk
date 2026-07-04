@@ -67,12 +67,16 @@ export class RoutingTranscriptionProvider implements TranscriptionProvider {
       throw new ProviderError(`Unknown transcription model: ${options.modelId ?? "default"}`, 404);
     }
 
-    if ((model.kind === "cloud" || model.kind === "custom") && model.config?.apiKey && (model.config.baseUrl || model.config.endpoint)) {
-      logger.info("Routing transcription to OpenAI-compatible provider", {
+    if ((model.kind === "cloud" || model.kind === "custom") && model.config?.apiKey) {
+      logger.info("Routing transcription to third-party provider", {
         modelId: model.id,
         kind: model.kind,
+        provider: model.config.provider,
         baseUrl: model.config.baseUrl ?? model.config.endpoint
       });
+      if (isSiliconFlowConfig(model.config)) {
+        return new SiliconFlowTranscriptionProvider(model.config, model.id).transcribe(audioFile, options);
+      }
       return new OpenAICompatibleTranscriptionProvider(model.config, model.id, model.kind).transcribe(audioFile, options);
     }
 
@@ -86,6 +90,65 @@ export class RoutingTranscriptionProvider implements TranscriptionProvider {
     }
 
     throw new ProviderError(`${model.name} is not configured.`, 400);
+  }
+}
+
+export class SiliconFlowTranscriptionProvider implements TranscriptionProvider {
+  constructor(
+    private readonly config: CloudProviderConfig,
+    private readonly fallbackModelId: string
+  ) {}
+
+  async transcribe(audioFile: string, options: TranscriptionOptions): Promise<TranscriptionResult> {
+    const shouldTranslate = options.outputLanguage !== "same" && options.outputLanguage !== options.language;
+    const form = new FormData();
+    const data = await readFile(audioFile);
+    form.append("file", new Blob([data], { type: "application/octet-stream" }), basename(audioFile));
+    form.append("model", this.config.model ?? this.config.modelName ?? "FunAudioLLM/SenseVoiceSmall");
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.config.timeoutMs ?? 120_000);
+
+    try {
+      const baseUrl = this.baseUrl();
+      logger.info("Calling SiliconFlow audio transcription endpoint", { baseUrl });
+      const response = await fetch(`${baseUrl}/v1/audio/transcriptions`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${this.config.apiKey}`
+        },
+        body: form,
+        signal: controller.signal
+      });
+      const text = await response.text();
+
+      if (!response.ok) {
+        logger.warn("SiliconFlow provider returned error", { status: response.status, body: text });
+        throw new ProviderError(`SiliconFlow returned ${response.status}: ${text}`, response.status);
+      }
+
+      const parsed = parseJsonObject(text);
+      const outputText = asString(parsed.text) ?? text;
+      logger.info("SiliconFlow provider completed", { status: response.status });
+
+      return {
+        text: outputText,
+        translatedText: undefined,
+        language: options.language,
+        targetLanguage: shouldTranslate ? options.outputLanguage : options.language,
+        duration: undefined,
+        modelId: options.modelId ?? this.fallbackModelId,
+        model: this.config.model ?? this.config.modelName ?? "FunAudioLLM/SenseVoiceSmall",
+        providerId: "siliconflow",
+        task: "transcription"
+      };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  private baseUrl(): string {
+    return (this.config.baseUrl ?? this.config.endpoint ?? "https://api.siliconflow.cn").replace(/\/+$/, "");
   }
 }
 
@@ -158,6 +221,10 @@ export class OpenAICompatibleTranscriptionProvider implements TranscriptionProvi
   private baseUrl(): string {
     return (this.config.baseUrl ?? this.config.endpoint ?? "https://api.openai.com").replace(/\/+$/, "");
   }
+}
+
+function isSiliconFlowConfig(config: CloudProviderConfig): boolean {
+  return /^siliconflow$/i.test(config.provider ?? "");
 }
 
 function parseJsonObject(text: string): Record<string, unknown> {

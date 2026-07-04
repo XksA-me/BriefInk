@@ -35,6 +35,13 @@ export interface SpeechModel {
   expectedSha256?: string;
   runtimeNote?: string;
   error?: string;
+  downloadProgress?: DownloadProgress;
+}
+
+export interface DownloadProgress {
+  receivedBytes: number;
+  totalBytes?: number;
+  percent?: number;
 }
 
 export interface AppSettings {
@@ -285,6 +292,7 @@ export interface BriefInkApi {
   startLocalApi(): Promise<AppSettings>;
   stopLocalApi(): Promise<AppSettings>;
   openLogsDirectory(): Promise<void>;
+  onModelsChanged(callback: (models: SpeechModel[]) => void): () => void;
   onRecordingState(callback: (state: RecordingState) => void): () => void;
   onHotkeyToggle(callback: () => void): () => void;
 }

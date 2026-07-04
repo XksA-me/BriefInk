@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, existsSync, createWriteStream, renameSync, rmSync, statSync } from "node:fs";
+import os from "node:os";
 import { readFile } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -26,7 +27,15 @@ const binaryCandidates = [
   "whisper-cpp"
 ];
 
-export async function downloadFile(url: string, destination: string, expectedBytes?: number, expectedSha256?: string): Promise<void> {
+type DownloadProgressHandler = (progress: { receivedBytes: number; totalBytes?: number; percent?: number }) => void;
+
+export async function downloadFile(
+  url: string,
+  destination: string,
+  expectedBytes?: number,
+  expectedSha256?: string,
+  onProgress?: DownloadProgressHandler
+): Promise<void> {
   mkdirSync(dirname(destination), { recursive: true });
   if (existsSync(destination)) {
     if (
@@ -50,15 +59,25 @@ export async function downloadFile(url: string, destination: string, expectedByt
     throw new Error(`Download failed ${response.status}: ${url}`);
   }
   const body = response.body;
+  const contentLength = Number(response.headers.get("content-length"));
+  const totalBytes = expectedBytes || (Number.isFinite(contentLength) && contentLength > 0 ? contentLength : undefined);
   const temporaryDestination = `${destination}.download`;
   rmSync(temporaryDestination, { force: true });
 
   await new Promise<void>((resolve, reject) => {
     const file = createWriteStream(temporaryDestination);
+    let receivedBytes = 0;
     body.pipeTo(
       new WritableStream({
         write(chunk) {
-          file.write(Buffer.from(chunk));
+          const buffer = Buffer.from(chunk);
+          receivedBytes += buffer.byteLength;
+          onProgress?.({
+            receivedBytes,
+            totalBytes,
+            percent: totalBytes ? Math.min(100, Math.round((receivedBytes / totalBytes) * 100)) : undefined
+          });
+          file.write(buffer);
         },
         close() {
           file.end(resolve);
@@ -101,7 +120,17 @@ export async function transcribeWithWhisperCpp(
   }
 
   const outputPrefix = join("/tmp", `briefink-whisper-${Date.now()}-${basename(audioFile).replace(/\W+/g, "-")}`);
-  const args = ["-m", model.localPath, "-f", audioFile, "-otxt", "-of", outputPrefix, "-nt"];
+  const args = [
+    "-m", model.localPath,
+    "-f", audioFile,
+    "-otxt",
+    "-of", outputPrefix,
+    "-nt",
+    "-t", String(recommendedWhisperThreads()),
+    "-bs", "1",
+    "-bo", "1"
+  ];
+  if (shouldDisableGpuForWhisper()) args.push("-ng");
   if (options.language) args.push("-l", whisperLanguage(options.language));
   if (options.outputLanguage === "en" && options.language !== "en") args.push("-tr");
 
@@ -136,6 +165,18 @@ export async function transcribeWithWhisperCpp(
     model: model.id,
     providerId: "whisper.cpp"
   };
+}
+
+function recommendedWhisperThreads(): number {
+  const cpuCount = os.cpus().length || 4;
+  if (process.platform === "darwin" && process.arch === "x64") return Math.max(4, Math.min(8, cpuCount - 1));
+  return Math.max(4, Math.min(cpuCount, 8));
+}
+
+function shouldDisableGpuForWhisper(): boolean {
+  if (process.env.BRIEFINK_WHISPER_GPU === "1") return false;
+  if (process.env.BRIEFINK_WHISPER_GPU === "0") return true;
+  return process.platform === "darwin" && process.arch === "x64";
 }
 
 export async function hasWhisperCppRuntime(): Promise<boolean> {

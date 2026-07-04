@@ -33,7 +33,8 @@ import type {
   OutputResult,
   OutputTarget,
   RecordingState,
-  SettingsPatch
+  SettingsPatch,
+  SpeechModel
 } from "../src/shared/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -506,6 +507,10 @@ function broadcastRecordingState() {
   updateHud(recordingState);
 }
 
+function broadcastModels(models: SpeechModel[]) {
+  mainWindow?.webContents.send("models:changed", models);
+}
+
 function setRecordingState(patch: Partial<RecordingState>): RecordingState {
   recordingState = { ...recordingState, ...patch, updatedAt: Date.now() };
   broadcastRecordingState();
@@ -962,6 +967,7 @@ app.whenReady().then(async () => {
   settingsStore = new SettingsStore(getSettingsPath());
     historyStore = new HistoryStore(getHistoryPath());
     modelManager = new ModelManager(userDataPath("models"), getModelStatePath());
+    modelManager.setOnChange(broadcastModels);
     provider = createTranscriptionProvider(modelManager);
     localApiServer = new LocalApiServer(() => settingsStore.get(), modelManager, provider);
 

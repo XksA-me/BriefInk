@@ -3,7 +3,8 @@ import type {
   BriefInkApi,
   CloudProviderConfig,
   RecordingState,
-  SettingsPatch
+  SettingsPatch,
+  SpeechModel
 } from "../src/shared/types.js";
 
 const { contextBridge, ipcRenderer } = require("electron") as typeof import("electron");
@@ -35,6 +36,11 @@ const api: BriefInkApi = {
   startLocalApi: () => ipcRenderer.invoke("api:start"),
   stopLocalApi: () => ipcRenderer.invoke("api:stop"),
   openLogsDirectory: () => ipcRenderer.invoke("logs:openDirectory"),
+  onModelsChanged(callback: (models: SpeechModel[]) => void) {
+    const listener = (_event: IpcRendererEvent, models: SpeechModel[]) => callback(models);
+    ipcRenderer.on("models:changed", listener);
+    return () => ipcRenderer.off("models:changed", listener);
+  },
   onRecordingState(callback: (state: RecordingState) => void) {
     const listener = (_event: IpcRendererEvent, payload: { state?: RecordingState } | RecordingState) => {
       callback("state" in payload && payload.state ? payload.state : payload as RecordingState);

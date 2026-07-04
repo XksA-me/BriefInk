@@ -87,7 +87,7 @@ describe("LocalApiServer", () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      text: expect.stringContaining("using Custom OpenAI-compatible (en)"),
+      text: expect.stringContaining("using Third-party Speech API (en)"),
       language: "en",
       duration: 3.2,
       model: "custom-openai-compatible"
@@ -125,8 +125,8 @@ describe("LocalApiServer", () => {
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body).toMatchObject({
-      text: expect.stringContaining("using Custom OpenAI-compatible (en)"),
-      source_text: expect.stringContaining("using Custom OpenAI-compatible (en)"),
+      text: expect.stringContaining("using Third-party Speech API (en)"),
+      source_text: expect.stringContaining("using Third-party Speech API (en)"),
       source_language: "en",
       target_language: "zh",
       model: "custom-openai-compatible"

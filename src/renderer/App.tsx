@@ -60,9 +60,16 @@ export function App() {
 
   useEffect(() => {
     void refresh();
-    return window.briefInk.onRecordingState((recording) => {
+    const unsubscribeRecording = window.briefInk.onRecordingState((recording) => {
       setSnapshot((current) => (current ? { ...current, recording } : current));
     });
+    const unsubscribeModels = window.briefInk.onModelsChanged((models) => {
+      setSnapshot((current) => (current ? { ...current, models } : current));
+    });
+    return () => {
+      unsubscribeRecording();
+      unsubscribeModels();
+    };
   }, []);
 
   const toggleMicRecording = useCallback(async () => {
@@ -330,6 +337,9 @@ function ModelCard({
   const [openConfig, setOpenConfig] = useState(false);
   const isCloud = model.kind !== "local";
   const statusText = modelStatusText(model, busy, t);
+  const progress = model.downloadProgress;
+  const isDownloading = model.status === "downloading" || (busy && Boolean(progress));
+  const progressWidth = progress?.percent ?? (isDownloading ? 18 : 0);
 
   return (
     <article className={model.default ? "modelCard selected" : "modelCard"}>
@@ -350,7 +360,17 @@ function ModelCard({
         <span className={`runtimeDot ${model.status}`} />
         <span>{statusText}</span>
       </div>
-      {busy && <div className="progressRail"><span /></div>}
+      {isDownloading && (
+        <div className="downloadProgress">
+          <div className="progressRail">
+            <span style={{ width: `${progressWidth}%` }} />
+          </div>
+          <div className="progressMeta">
+            <span>{progress?.percent !== undefined ? `${progress.percent}%` : t("status.downloading")}</span>
+            <span>{formatBytes(progress?.receivedBytes)}{progress?.totalBytes ? ` / ${formatBytes(progress.totalBytes)}` : ""}</span>
+          </div>
+        </div>
+      )}
 
       <div className="cardActions">
         {model.status === "running" ? (
@@ -392,11 +412,22 @@ function ProviderConfigDialog({
   onConfigure: (id: string, config: CloudProviderConfig) => Promise<void>;
   t: Translator;
 }) {
-  const [provider, setProvider] = useState(model.config?.provider ?? "Custom");
-  const [baseUrl, setBaseUrl] = useState(model.config?.baseUrl ?? model.config?.endpoint ?? "");
+  const [provider, setProvider] = useState(model.config?.provider ?? "openai-compatible");
+  const [baseUrl, setBaseUrl] = useState(model.config?.baseUrl ?? model.config?.endpoint ?? "https://api.openai.com");
   const [apiKey, setApiKey] = useState(model.config?.apiKey ?? "");
-  const [modelName, setModelName] = useState(model.config?.modelName ?? model.config?.model ?? "whisper-large-v3-turbo");
+  const [modelName, setModelName] = useState(model.config?.modelName ?? model.config?.model ?? "whisper-1");
   const [timeoutMs, setTimeoutMs] = useState(model.config?.timeoutMs ?? 120000);
+
+  function changeProvider(nextProvider: string) {
+    setProvider(nextProvider);
+    if (nextProvider === "siliconflow") {
+      setBaseUrl("https://api.siliconflow.cn");
+      setModelName((current) => current && current !== "whisper-1" ? current : "FunAudioLLM/SenseVoiceSmall");
+      return;
+    }
+    setBaseUrl((current) => current && current !== "https://api.siliconflow.cn" ? current : "https://api.openai.com");
+    setModelName((current) => current && current !== "FunAudioLLM/SenseVoiceSmall" ? current : "whisper-1");
+  }
 
   return (
     <div className="modalBackdrop" role="presentation" onClick={onClose}>
@@ -413,16 +444,14 @@ function ProviderConfigDialog({
         <div className="modalGrid">
           <label>
             {t("model.provider")}
-            <select value={provider} onChange={(event) => setProvider(event.target.value)}>
-              <option value="Custom">Custom</option>
-              <option value="OpenAI">OpenAI</option>
-              <option value="Groq">Groq</option>
-              <option value="Deepgram">Deepgram</option>
+            <select value={provider} onChange={(event) => changeProvider(event.target.value)}>
+              <option value="openai-compatible">{t("model.openaiCompatible")}</option>
+              <option value="siliconflow">SiliconFlow</option>
             </select>
           </label>
           <label>
             {t("model.baseUrl")}
-            <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com" />
+            <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={provider === "siliconflow" ? "https://api.siliconflow.cn" : "https://api.openai.com"} />
           </label>
           <label>
             {t("model.apiKey")}
@@ -430,7 +459,11 @@ function ProviderConfigDialog({
           </label>
           <label>
             {t("model.modelName")}
-            <input value={modelName} onChange={(event) => setModelName(event.target.value)} placeholder="whisper-large-v3-turbo" />
+            <input
+              value={modelName}
+              onChange={(event) => setModelName(event.target.value)}
+              placeholder={provider === "siliconflow" ? "FunAudioLLM/SenseVoiceSmall" : "whisper-1"}
+            />
           </label>
           <label>
             {t("model.timeout")}
@@ -889,6 +922,7 @@ function recordingTitle(state: RecordingState, t: Translator) {
 }
 
 function modelStatusText(model: SpeechModel, busy: boolean, t: Translator) {
+  if (model.status === "downloading" && model.downloadProgress?.percent !== undefined) return `${t("model.downloading")} ${model.downloadProgress.percent}%`;
   if (busy && model.status === "not_installed") return t("model.downloading");
   if (busy) return t("model.applying");
   if (model.status === "running") return model.engine === "whisper.cpp" ? t("model.readyLocal") : t("common.running");
@@ -897,6 +931,18 @@ function modelStatusText(model: SpeechModel, busy: boolean, t: Translator) {
   if (model.status === "not_installed") return model.downloadUrl ? t("model.notInstalled") : t("common.notConfigured");
   if (model.status === "downloading") return t("model.downloading");
   return model.error ?? t("common.needsAttention");
+}
+
+function formatBytes(bytes?: number): string {
+  if (!bytes || bytes < 0) return "--";
+  const units = ["B", "KB", "MB", "GB"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit += 1;
+  }
+  return `${value >= 10 || unit === 0 ? value.toFixed(0) : value.toFixed(1)} ${units[unit]}`;
 }
 
 function RecordingHud({ recording, onOpenRecord, t }: { recording: RecordingState; onOpenRecord: () => void; t: Translator }) {
