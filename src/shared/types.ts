@@ -263,6 +263,15 @@ export interface BriefInkSnapshot {
   localApiRunning: boolean;
 }
 
+export interface UpdateCheckResult {
+  currentVersion: string;
+  latestVersion: string;
+  updateAvailable: boolean;
+  releaseUrl: string;
+  downloadUrl?: string;
+  releaseName?: string;
+}
+
 export type AppSnapshot = BriefInkSnapshot;
 
 export interface BriefInkApi {
@@ -292,6 +301,8 @@ export interface BriefInkApi {
   startLocalApi(): Promise<AppSettings>;
   stopLocalApi(): Promise<AppSettings>;
   openLogsDirectory(): Promise<void>;
+  checkForUpdates(): Promise<UpdateCheckResult>;
+  openExternalUrl(url: string): Promise<void>;
   onModelsChanged(callback: (models: SpeechModel[]) => void): () => void;
   onRecordingState(callback: (state: RecordingState) => void): () => void;
   onHotkeyToggle(callback: () => void): () => void;

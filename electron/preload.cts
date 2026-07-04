@@ -36,6 +36,8 @@ const api: BriefInkApi = {
   startLocalApi: () => ipcRenderer.invoke("api:start"),
   stopLocalApi: () => ipcRenderer.invoke("api:stop"),
   openLogsDirectory: () => ipcRenderer.invoke("logs:openDirectory"),
+  checkForUpdates: () => ipcRenderer.invoke("app:checkForUpdates"),
+  openExternalUrl: (url: string) => ipcRenderer.invoke("app:openExternalUrl", url),
   onModelsChanged(callback: (models: SpeechModel[]) => void) {
     const listener = (_event: IpcRendererEvent, models: SpeechModel[]) => callback(models);
     ipcRenderer.on("models:changed", listener);

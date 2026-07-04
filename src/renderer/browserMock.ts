@@ -225,6 +225,18 @@ export function installBrowserMockApi() {
     async openLogsDirectory() {
       console.info("BriefInk preview: logs folder is only available in the Electron app.");
     },
+    async checkForUpdates() {
+      return {
+        currentVersion: snapshot.appVersion,
+        latestVersion: snapshot.appVersion,
+        updateAvailable: false,
+        releaseUrl: "https://github.com/XksA-me/BriefInk",
+        releaseName: `BriefInk v${snapshot.appVersion}`
+      };
+    },
+    async openExternalUrl(url: string) {
+      console.info("BriefInk preview: opening external URL", url);
+    },
     onModelsChanged(callback) {
       modelListeners.add(callback);
       return () => modelListeners.delete(callback);

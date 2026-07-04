@@ -685,6 +685,7 @@ function SettingsPage({
   const [microphoneAccess, setMicrophoneAccess] = useState<string>("unknown");
   const [accessibilityAccess, setAccessibilityAccess] = useState<boolean>(false);
   const [audioDevices, setAudioDevices] = useState<AudioDeviceOption[]>([{ deviceId: "default", label: t("settings.systemDefault") }]);
+  const [checkingUpdates, setCheckingUpdates] = useState(false);
 
   const refreshAudioDevices = useCallback(async () => {
     const access = await window.briefInk.getMicrophoneAccess();
@@ -720,6 +721,28 @@ function SettingsPage({
   useEffect(() => {
     void refreshAudioDevices();
   }, [refreshAudioDevices]);
+
+  async function checkForUpdates() {
+    setCheckingUpdates(true);
+    try {
+      const result = await window.briefInk.checkForUpdates();
+      if (result.updateAvailable) {
+        const shouldOpen = window.confirm(t("settings.updateAvailable", {
+          latest: result.latestVersion,
+          current: result.currentVersion
+        }));
+        if (shouldOpen) {
+          await window.briefInk.openExternalUrl(result.releaseUrl);
+        }
+        return;
+      }
+      window.alert(t("settings.upToDate", { current: result.currentVersion }));
+    } catch {
+      window.alert(t("settings.updateCheckFailed"));
+    } finally {
+      setCheckingUpdates(false);
+    }
+  }
 
   return (
     <section className="page">
@@ -800,6 +823,24 @@ function SettingsPage({
             </label>
             <div className="apiStatus"><Server size={16} /> {snapshot.localApiRunning ? `${t("common.running")} 127.0.0.1` : t("common.stopped")}</div>
           </SettingsGroup>
+          <SettingsGroup title={t("settings.project")}>
+            <div className="infoBlock">
+              <strong>{t("settings.projectName")}</strong>
+              <span>{t("settings.projectDescription")}</span>
+            </div>
+            <div className="copyRow">
+              <span>{t("settings.repository")}</span>
+              <code>github.com/XksA-me/BriefInk</code>
+            </div>
+            <div className="inlineActions">
+              <button className="ghostButton" onClick={() => void window.briefInk.openExternalUrl("https://github.com/XksA-me/BriefInk")}>
+                <FolderOpen size={16} /> {t("settings.openRepository")}
+              </button>
+              <button className="primaryButton" disabled={checkingUpdates} onClick={() => void checkForUpdates()}>
+                <RefreshCw size={16} /> {checkingUpdates ? t("common.refresh") : t("settings.checkUpdates")}
+              </button>
+            </div>
+          </SettingsGroup>
         </div>
         <div className="settingsColumn">
           <SettingsGroup title={t("settings.recording")}>
@@ -854,6 +895,20 @@ function SettingsPage({
               <FolderOpen size={16} /> {t("settings.openLogs")}
             </button>
             <div className="hintText">{t("settings.logsHint")}</div>
+          </SettingsGroup>
+          <SettingsGroup title={t("settings.support")}>
+            <div className="infoBlock">
+              <strong>{t("settings.support")}</strong>
+              <span>{t("settings.supportDescription")}</span>
+            </div>
+            <div className="copyRow">
+              <span>{t("settings.wechat")}</span>
+              <code>aibrief</code>
+            </div>
+            <div className="copyRow">
+              <span>{t("settings.email")}</span>
+              <code>zjhbrief@163.com</code>
+            </div>
           </SettingsGroup>
         </div>
       </div>

@@ -34,7 +34,8 @@ import type {
   OutputTarget,
   RecordingState,
   SettingsPatch,
-  SpeechModel
+  SpeechModel,
+  UpdateCheckResult
 } from "../src/shared/types.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,6 +51,8 @@ let provider: TranscriptionProvider;
 let localApiServer: LocalApiServer;
 let isQuitting = false;
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
+const releaseApiUrl = "https://api.github.com/repos/XksA-me/BriefInk/releases/latest";
+const projectUrl = "https://github.com/XksA-me/BriefInk";
 
 let recordingState: RecordingState = {
   status: "idle",
@@ -757,6 +760,13 @@ function registerIpc() {
   ipcMain.handle("logs:openDirectory", async () => {
     await shell.openPath(path.dirname(getLogPath()));
   });
+  ipcMain.handle("app:checkForUpdates", () => checkForUpdates());
+  ipcMain.handle("app:openExternalUrl", async (_event, url: string) => {
+    if (!/^https:\/\/github\.com\/XksA-me\/BriefInk(?:\/|$)/.test(url)) {
+      throw new Error("Only BriefInk GitHub links can be opened from this action.");
+    }
+    await shell.openExternal(url);
+  });
   ipcMain.handle("files:selectDirectory", async () => {
     const options: Electron.OpenDialogOptions = {
       properties: ["openDirectory", "createDirectory"]
@@ -788,6 +798,78 @@ function registerIpc() {
     await localApiServer.stop();
     return settingsStore.update({ localApi: { enabled: false } });
   });
+}
+
+async function checkForUpdates(): Promise<UpdateCheckResult> {
+  logger.info("Checking for BriefInk updates", { releaseApiUrl });
+  const response = await fetch(releaseApiUrl, {
+    headers: {
+      Accept: "application/vnd.github+json",
+      "User-Agent": `BriefInk/${app.getVersion()}`
+    }
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    logger.warn("GitHub release check failed", { status: response.status, body: text });
+    throw new Error(`GitHub release check failed: ${response.status}`);
+  }
+
+  const release = parseGitHubRelease(text);
+  const currentVersion = app.getVersion();
+  const latestVersion = normalizeVersion(release.tagName);
+  const preferredAsset = release.assets.find((asset) => asset.name.includes(process.arch === "x64" ? "x64" : "arm64") && asset.name.endsWith(".dmg"))
+    ?? release.assets.find((asset) => asset.name.endsWith(".dmg"));
+
+  return {
+    currentVersion,
+    latestVersion,
+    updateAvailable: compareVersions(latestVersion, currentVersion) > 0,
+    releaseUrl: release.htmlUrl,
+    downloadUrl: preferredAsset?.browserDownloadUrl,
+    releaseName: release.name
+  };
+}
+
+function parseGitHubRelease(text: string): {
+  tagName: string;
+  name?: string;
+  htmlUrl: string;
+  assets: Array<{ name: string; browserDownloadUrl: string }>;
+} {
+  const parsed = JSON.parse(text) as Record<string, unknown>;
+  const tagName = typeof parsed.tag_name === "string" ? parsed.tag_name : "";
+  const htmlUrl = typeof parsed.html_url === "string" ? parsed.html_url : projectUrl;
+  const assets = Array.isArray(parsed.assets)
+    ? parsed.assets.flatMap((asset) => {
+        if (!asset || typeof asset !== "object") return [];
+        const record = asset as Record<string, unknown>;
+        const name = typeof record.name === "string" ? record.name : "";
+        const browserDownloadUrl = typeof record.browser_download_url === "string" ? record.browser_download_url : "";
+        return name && browserDownloadUrl ? [{ name, browserDownloadUrl }] : [];
+      })
+    : [];
+  if (!tagName) throw new Error("GitHub latest release did not include a tag name.");
+  return {
+    tagName,
+    name: typeof parsed.name === "string" ? parsed.name : undefined,
+    htmlUrl,
+    assets
+  };
+}
+
+function normalizeVersion(version: string): string {
+  return version.trim().replace(/^v/i, "");
+}
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = normalizeVersion(left).split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0);
+  const rightParts = normalizeVersion(right).split(/[.-]/).map((part) => Number.parseInt(part, 10) || 0);
+  const length = Math.max(leftParts.length, rightParts.length);
+  for (let index = 0; index < length; index += 1) {
+    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
 }
 
 function getSettingsPath(): string {

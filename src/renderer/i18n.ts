@@ -142,7 +142,20 @@ export const messages = {
       version: "Version",
       openLogs: "Open logs folder",
       logsHint: "Logs are written to the app data directory and rotate at 2 MB.",
-      granted: "granted"
+      granted: "granted",
+      project: "Project",
+      projectName: "BriefInk open source project",
+      projectDescription: "A lightweight macOS speech-to-text tool focused on hotkey recording, local Whisper, and third-party providers.",
+      repository: "Repository",
+      openRepository: "Open repository",
+      checkUpdates: "Check for updates",
+      updateAvailable: "BriefInk {latest} is available. Current version: {current}. Open the release page to download the update?",
+      upToDate: "BriefInk is up to date. Current version: {current}.",
+      updateCheckFailed: "Could not check for updates. Please try again later.",
+      support: "Support",
+      supportDescription: "If you have problems or new feature requests, contact developer 老表 any time.",
+      wechat: "WeChat",
+      email: "Email"
     },
     languages: {
       auto: "Auto Detect",
@@ -307,7 +320,20 @@ export const messages = {
       version: "版本",
       openLogs: "打开日志目录",
       logsHint: "日志写入应用数据目录，超过 2 MB 会轮转。",
-      granted: "已授权"
+      granted: "已授权",
+      project: "项目",
+      projectName: "BriefInk 开源项目",
+      projectDescription: "一个轻量的 macOS 语音转文字工具，专注快捷键录音、本地 Whisper 和第三方语音模型。",
+      repository: "项目地址",
+      openRepository: "打开项目",
+      checkUpdates: "检查版本更新",
+      updateAvailable: "发现 BriefInk {latest} 新版本。当前版本：{current}。是否打开 Release 页面下载更新包？",
+      upToDate: "BriefInk 已是最新版本。当前版本：{current}。",
+      updateCheckFailed: "检查更新失败，请稍后再试。",
+      support: "问题反馈",
+      supportDescription: "如果使用上有啥问题或者新需求，可以随时联系开发者老表。",
+      wechat: "微信",
+      email: "邮箱"
     },
     languages: {
       auto: "自动检测",
