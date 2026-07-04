@@ -5,6 +5,8 @@ This release focuses on small usability polish and project/support visibility.
 ## What's Changed
 
 - Refined dropdown/select UI across Models and Settings with a clearer arrow, hover state, focus state, and better right-side spacing.
+- Added SiliconFlow as a supported third-party speech-to-text provider alongside OpenAI-compatible APIs.
+- Improved model download visibility with live progress updates in the Models page.
 - Added Support information in Settings:
   - Developer WeChat: `aibrief`
   - Email: `zjhbrief@163.com`
