@@ -1,6 +1,6 @@
 {
   "name": "briefink",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": false,
   "description": "A minimal macOS speech-to-text desktop tool.",
   "author": "BriefInk",

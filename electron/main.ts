@@ -174,6 +174,7 @@ async function createHudWindow(): Promise<void> {
   hudWindow = new BrowserWindow({
     width: 520,
     height: 104,
+    ...(process.platform === "darwin" ? { type: "panel" } : {}),
     show: false,
     frame: false,
     transparent: true,
@@ -194,19 +195,27 @@ async function createHudWindow(): Promise<void> {
   });
 
   hudWindow.setIgnoreMouseEvents(true, { forward: true });
-  hudWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  hudWindow.setAlwaysOnTop(true, "screen-saver");
+  prepareHudForFullscreenSpaces();
   hudWindow.on("closed", () => {
     hudWindow = null;
   });
   await hudWindow.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(hudHtml())}`);
 }
 
+function prepareHudForFullscreenSpaces(): void {
+  if (!hudWindow || hudWindow.isDestroyed()) return;
+  hudWindow.setVisibleOnAllWorkspaces(true, {
+    visibleOnFullScreen: true,
+    skipTransformProcessType: true
+  });
+  hudWindow.setAlwaysOnTop(true, "screen-saver", 1);
+}
+
 function positionHudWindow(): void {
   if (!hudWindow || hudWindow.isDestroyed()) return;
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor);
-  const { x, y, width, height } = display.workArea;
+  const { x, y, width, height } = display.bounds;
   const [hudWidth, hudHeight] = hudWindow.getSize();
   hudWindow.setBounds({
     x: Math.round(x + (width - hudWidth) / 2),
@@ -230,7 +239,10 @@ function updateHud(state: RecordingState): void {
   }
 
   positionHudWindow();
+  prepareHudForFullscreenSpaces();
   hudWindow.showInactive();
+  hudWindow.moveTop();
+  prepareHudForFullscreenSpaces();
   if (state.status === "completed" || state.status === "error") {
     hudHideTimer = setTimeout(() => {
       hudWindow?.hide();
